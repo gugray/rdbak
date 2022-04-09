@@ -13,8 +13,10 @@ import (
 
 const pageSize = 40
 const loginUrl = "https://api.raindrop.io/v1/auth/email/login"
-const listUrl = "https://api.raindrop.io/v1/raindrops/0?sort=-created&perpage=%v&page=%v&version=2"
+const listUrl = "https://api.raindrop.io/v1/raindrops/0?sort=-lastUpdate&perpage=%v&page=%v&version=2"
 const downloadUrl = "https://api.raindrop.io/v1/raindrop/%v/cache"
+const collsUrl = "https://api.raindrop.io/v1/collections"
+const collsChildrenUrl = "https://api.raindrop.io/v1/collections/childrens"
 
 type apiClient struct {
 	jar    *cookieJar
@@ -22,6 +24,7 @@ type apiClient struct {
 }
 
 func newApiClient() *apiClient {
+
 	ac := apiClient{}
 	ac.jar = newJar()
 	ac.client = &http.Client{nil, nil, ac.jar, 30 * time.Second}
@@ -29,6 +32,7 @@ func newApiClient() *apiClient {
 }
 
 func (ac *apiClient) login(email, pass string) {
+
 	payload := map[string]interface{}{"email": email, "password": pass}
 	payloadStr, _ := json.Marshal(payload)
 
@@ -63,6 +67,7 @@ func (ac *apiClient) login(email, pass string) {
 }
 
 func (ac *apiClient) listBookmarks(page int) listRes {
+
 	url := fmt.Sprintf(listUrl, pageSize, page)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -95,7 +100,7 @@ func (ac *apiClient) listBookmarks(page int) listRes {
 	return listRes
 }
 
-func (ac *apiClient) downloadFile(id uint64, fn string) {
+func (ac *apiClient) downloadFile(id uint64, fn string) bool {
 
 	url := fmt.Sprintf(downloadUrl, id)
 
@@ -105,13 +110,10 @@ func (ac *apiClient) downloadFile(id uint64, fn string) {
 	}
 	defer resp.Body.Close()
 
-	// We do expect 404s for pages that Raindrop could not archive
-	if resp.StatusCode == http.StatusNotFound {
-		return
-	}
-
+	// If we don't get a 200 we don't panic. Maybe problem is transient and download
+	// will work next time
 	if resp.StatusCode != http.StatusOK {
-		panic(fmt.Sprintf("Bad status at download: %v: %s", resp.StatusCode, resp.Status))
+		return false
 	}
 
 	outf, err := os.Create(fn)
@@ -124,4 +126,6 @@ func (ac *apiClient) downloadFile(id uint64, fn string) {
 	if err != nil {
 		panic(err)
 	}
+
+	return true
 }

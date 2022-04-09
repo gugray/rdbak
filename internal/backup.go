@@ -11,38 +11,74 @@ import (
 
 func Backup(cfg *Config) {
 
+	fmt.Printf("%s Starting bookmarks backup\n", time.Now().Format("2006-01-02 15:04:05"))
+
 	bookmarks := loadBookmarks(cfg.BookmarksFile)
 
+	// Raindrip API client: start by logging in
 	ac := newApiClient()
 	ac.login(cfg.Email, cfg.Password)
 
+	// We'll be looking for "lastUpdate" times later then we last saw
 	var latest time.Time
 	for _, bm := range bookmarks {
-		if bm.Created.After(latest) {
-			latest = bm.Created
+		if bm.LastUpdate.After(latest) {
+			latest = bm.LastUpdate
 		}
 	}
 
-	newBookmarks := getNewBookmarks(ac, latest)
+	// Get updated and new bookmarks
+	changedBookmarks := getChangedBookmarks(ac, latest)
 
-	for _, bm := range newBookmarks {
-		download(ac, cfg.ExportDir, bm.Id)
+	// Download permanent copy where ready and file still missing
+	downloadCount := 0
+	for _, bm := range changedBookmarks {
+		if bm.Cache.Status != "ready" {
+			continue
+		}
+		downloaded := downloadIfMissing(ac, cfg.ExportDir, bm.Id)
+		if downloaded {
+			downloadCount++
+		}
 	}
 
-	bookmarks = append(bookmarks, newBookmarks...)
-	saveBookmarks(cfg.BookmarksFile, bookmarks)
+	// Marge unchanged bookmarks with changed/new
+	ids := make(map[uint64]bool)
+	newBookmarks := make([]*bookmark, 0, len(bookmarks)+len(changedBookmarks))
+	for _, bm := range changedBookmarks {
+		newBookmarks = append(newBookmarks, bm)
+		ids[bm.Id] = true
+	}
+	for _, bm := range bookmarks {
+		if _, exists := ids[bm.Id]; exists {
+			continue
+		}
+		newBookmarks = append(newBookmarks, bm)
+		ids[bm.Id] = true
+	}
+
+	// Save updated bookmarks JSON
+	saveBookmarks(cfg.BookmarksFile, newBookmarks)
+
+	// Report
+	fmt.Printf("Finished. %v bookmark(s) changed; %v new file(s) downloaded.\n", len(changedBookmarks), downloadCount)
 }
 
-func download(ac *apiClient, dir string, id uint64) {
+func downloadIfMissing(ac *apiClient, dir string, id uint64) bool {
 
 	fn := fmt.Sprintf("%v.html", id)
 	fn = path.Join(dir, fn)
-	ac.downloadFile(id, fn)
+
+	if stat, err := os.Stat(fn); err == nil && stat.Size() != 0 {
+		return false
+	}
+
+	return ac.downloadFile(id, fn)
 }
 
 func saveBookmarks(fn string, bookmarks []*bookmark) {
 
-	json, err := json.Marshal(bookmarks)
+	json, err := json.MarshalIndent(bookmarks, "", "  ")
 	if err != nil {
 		panic(err)
 	}
@@ -71,7 +107,7 @@ func loadBookmarks(fn string) []*bookmark {
 	return bookmarks
 }
 
-func getNewBookmarks(ac *apiClient, lastSeen time.Time) []*bookmark {
+func getChangedBookmarks(ac *apiClient, lastSeen time.Time) []*bookmark {
 
 	var res []*bookmark
 
@@ -80,7 +116,7 @@ func getNewBookmarks(ac *apiClient, lastSeen time.Time) []*bookmark {
 		lr := ac.listBookmarks(page)
 		over := len(lr.Items) < pageSize
 		for _, itm := range lr.Items {
-			if itm.Created.After(lastSeen) {
+			if itm.LastUpdate.After(lastSeen) {
 				res = append(res, itm)
 			} else {
 				over = true
@@ -90,8 +126,6 @@ func getNewBookmarks(ac *apiClient, lastSeen time.Time) []*bookmark {
 			break
 		}
 		page += 1
-		// DBG: Quit after first page
-		break
 	}
 
 	return res

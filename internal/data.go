@@ -2,6 +2,10 @@ package internal
 
 import "time"
 
+type cache struct {
+	Status string `json:"status"`
+}
+
 type bookmark struct {
 	Id           uint64    `json:"_id"`
 	Link         string    `json:"link"`
@@ -9,7 +13,9 @@ type bookmark struct {
 	Excerpt      string    `json:"excerpt"`
 	Type         string    `json:"type"`
 	Created      time.Time `json:"created"`
-	CollectionId uint64    `json:"collectionId"`
+	LastUpdate   time.Time `json:"lastUpdate"`
+	CollectionId int64     `json:"collectionId"`
+	Cache        cache     `json:"cache"`
 }
 
 type listRes struct {

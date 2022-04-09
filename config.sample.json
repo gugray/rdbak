@@ -1,0 +1,6 @@
+{
+  "email": "<login email for Raindrop>",
+  "password": "<login password for Raindrop>",
+  "bookmarksFile": "<data-path>/bookmarks.json",
+  "exportDir": "<downloads-folder>"
+}
