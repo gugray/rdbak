@@ -106,13 +106,15 @@ func (ac *apiClient) downloadFile(id uint64, fn string) bool {
 
 	resp, err := ac.client.Get(url)
 	if err != nil {
-		panic(err)
+		fmt.Printf("Error creating client for %v\n%v\n", url, err)
+		return false
 	}
 	defer resp.Body.Close()
 
 	// If we don't get a 200 we don't panic. Maybe problem is transient and download
 	// will work next time
 	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("Got status %v trying to download %v\n", resp.StatusCode, url)
 		return false
 	}
 
@@ -124,7 +126,8 @@ func (ac *apiClient) downloadFile(id uint64, fn string) bool {
 
 	_, err = io.Copy(outf, resp.Body)
 	if err != nil {
-		panic(err)
+		fmt.Printf("Error reading content from %v\n%v\n", url, err)
+		return false
 	}
 
 	return true
