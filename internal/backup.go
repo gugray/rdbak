@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path"
 	"time"
 )
 
@@ -15,65 +14,60 @@ func Backup(cfg *Config) {
 
 	bookmarks := loadBookmarks(cfg.BookmarksFile)
 
-	// Raindrip API client: start by logging in
+	// Raindrop API client: start by logging in
 	ac := newApiClient()
 	ac.login(cfg.Email, cfg.Password)
 
-	// We'll be looking for "lastUpdate" times later then we last saw
-	var latest time.Time
+	idToBookmark := make(map[uint64]*bookmark)
 	for _, bm := range bookmarks {
-		if bm.LastUpdate.After(latest) {
-			latest = bm.LastUpdate
-		}
+		idToBookmark[bm.Id] = bm
 	}
 
 	// Get updated and new bookmarks
-	changedBookmarks := getChangedBookmarks(ac, latest)
+	changedBookmarks := getChangedBookmarks(ac, idToBookmark)
 
 	// Download permanent copy where ready and file still missing
 	downloadCount := 0
+	failedIds := make(map[uint64]bool)
 	for _, bm := range changedBookmarks {
 		if bm.Cache.Status != "ready" {
 			continue
 		}
-		downloaded := downloadIfMissing(ac, cfg.ExportDir, bm.Id)
+		downloaded, err := ac.downloadFileIfMissing(bm.Id, cfg.ExportDir)
+		if err != nil {
+			failedIds[bm.Id] = true
+		}
 		if downloaded {
 			downloadCount++
 		}
 	}
 
 	// Marge unchanged bookmarks with changed/new
-	ids := make(map[uint64]bool)
+	keptIds := make(map[uint64]bool)
 	newBookmarks := make([]*bookmark, 0, len(bookmarks)+len(changedBookmarks))
 	for _, bm := range changedBookmarks {
-		newBookmarks = append(newBookmarks, bm)
-		ids[bm.Id] = true
-	}
-	for _, bm := range bookmarks {
-		if _, exists := ids[bm.Id]; exists {
+		if _, exists := failedIds[bm.Id]; exists {
 			continue
 		}
 		newBookmarks = append(newBookmarks, bm)
-		ids[bm.Id] = true
+		keptIds[bm.Id] = true
+	}
+	for _, bm := range bookmarks {
+		if _, exists := failedIds[bm.Id]; exists {
+			continue
+		}
+		if _, exists := keptIds[bm.Id]; exists {
+			continue
+		}
+		newBookmarks = append(newBookmarks, bm)
+		keptIds[bm.Id] = true
 	}
 
 	// Save updated bookmarks JSON
 	saveBookmarks(cfg.BookmarksFile, newBookmarks)
 
 	// Report
-	fmt.Printf("Finished. %v bookmark(s) changed; %v new file(s) downloaded.\n", len(changedBookmarks), downloadCount)
-}
-
-func downloadIfMissing(ac *apiClient, dir string, id uint64) bool {
-
-	fn := fmt.Sprintf("%v.html", id)
-	fn = path.Join(dir, fn)
-
-	if stat, err := os.Stat(fn); err == nil && stat.Size() != 0 {
-		return false
-	}
-
-	return ac.downloadFile(id, fn)
+	fmt.Printf("Finished. %v bookmark(s) new or changed; %v new file(s) downloaded.\n", len(changedBookmarks), downloadCount)
 }
 
 func saveBookmarks(fn string, bookmarks []*bookmark) {
@@ -107,7 +101,7 @@ func loadBookmarks(fn string) []*bookmark {
 	return bookmarks
 }
 
-func getChangedBookmarks(ac *apiClient, lastSeen time.Time) []*bookmark {
+func getChangedBookmarks(ac *apiClient, storedBookmarks map[uint64]*bookmark) []*bookmark {
 
 	var res []*bookmark
 
@@ -116,12 +110,14 @@ func getChangedBookmarks(ac *apiClient, lastSeen time.Time) []*bookmark {
 		lr := ac.listBookmarks(page)
 		over := len(lr.Items) < pageSize
 		for _, itm := range lr.Items {
-			if itm.LastUpdate.After(lastSeen) {
+			if storedBm, exists := storedBookmarks[itm.Id]; !exists {
 				res = append(res, itm)
-			} else {
-				over = true
+			} else if itm.LastUpdate.After(storedBm.LastUpdate) {
+				res = append(res, itm)
 			}
 		}
+		// DBG
+		//over = true
 		if over {
 			break
 		}
