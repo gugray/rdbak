@@ -2,6 +2,7 @@ package internal
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,7 +17,7 @@ import (
 
 const pageSize = 40
 const maxFileNameLen = 128
-const timeoutSec = 120
+const timeoutSec = 60
 const loginUrl = "https://api.raindrop.io/v1/auth/email/login"
 const listUrl = "https://api.raindrop.io/v1/raindrops/0?sort=-lastUpdate&perpage=%v&page=%v&version=2"
 const downloadUrl = "https://api.raindrop.io/v1/raindrop/%v/cache?download"
@@ -33,7 +34,7 @@ func newApiClient() *apiClient {
 
 	ac := apiClient{}
 	ac.jar = newJar()
-	ac.client = &http.Client{nil, nil, ac.jar, timeoutSec * time.Second}
+	ac.client = &http.Client{nil, nil, ac.jar, 0}
 	ac.reDownloadName = regexp.MustCompile("attachment; filename=\"(.+)\"")
 	return &ac
 }
@@ -43,7 +44,9 @@ func (ac *apiClient) login(email, pass string) {
 	payload := map[string]interface{}{"email": email, "password": pass}
 	payloadStr, _ := json.Marshal(payload)
 
-	req, err := http.NewRequest("POST", loginUrl, bytes.NewBuffer(payloadStr))
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutSec*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", loginUrl, bytes.NewBuffer(payloadStr))
 	if err != nil {
 		panic(err)
 	}
@@ -75,8 +78,10 @@ func (ac *apiClient) login(email, pass string) {
 
 func (ac *apiClient) listBookmarks(page int) listRes {
 
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutSec*time.Second)
+	defer cancel()
 	url := fmt.Sprintf(listUrl, pageSize, page)
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -135,9 +140,11 @@ func safeDeleteFile(fn string) {
 
 func (ac *apiClient) downloadFileIfMissing(id uint64, dir string) (bool, error) {
 
+	etc := NewExtensibleTimeoutContext(timeoutSec)
+	defer etc.Cancel()
 	url := fmt.Sprintf(downloadUrl, id)
-
-	resp, err := ac.client.Get(url)
+	req, _ := http.NewRequestWithContext(etc.Context(), "GET", url, nil)
+	resp, err := ac.client.Do(req)
 	if err != nil {
 		fmt.Printf("Error creating client for %v\n%v\n", url, err)
 		return false, err
@@ -171,11 +178,22 @@ func (ac *apiClient) downloadFileIfMissing(id uint64, dir string) (bool, error) 
 	}
 	defer outf.Close()
 
-	_, err = io.Copy(outf, resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading content from %v\n%v\n", url, err)
-		safeDeleteFile(fn)
-		return false, err
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := resp.Body.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			fmt.Printf("Error reading content from %v\n%v\n", url, err)
+			outf.Close()
+			safeDeleteFile(fn)
+			return false, err
+		}
+		if n > 0 {
+			outf.Write(buf[:n])
+			etc.Extend()
+		}
 	}
 
 	return true, nil
