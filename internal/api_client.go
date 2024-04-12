@@ -138,6 +138,36 @@ func safeDeleteFile(fn string) {
 	}
 }
 
+func (ac *apiClient) getFileName(id uint64, resp *http.Response) string {
+
+	// Baseline: file name is ID
+	fn := fmt.Sprintf("%v", id)
+
+	// Download file name is expected in a header
+	if cdp := resp.Header.Get("Content-Disposition"); cdp != "" {
+		groups := ac.reDownloadName.FindStringSubmatch(cdp)
+		if groups != nil {
+			name := limitLength(groups[1], maxFileNameLen)
+			fn += "-" + name
+		}
+	}
+
+	// Add extension based on mime type, if present
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		newExt := ""
+		if strings.HasPrefix(ct, "application/pdf") {
+			newExt = ".pdf"
+		}
+		if newExt != "" {
+			fn = strings.TrimSuffix(fn, ".html")
+			fn += newExt
+		}
+	}
+
+	// Whee
+	return fn
+}
+
 func (ac *apiClient) downloadFileIfMissing(id uint64, dir string) (bool, error) {
 
 	etc := NewExtensibleTimeoutContext(timeoutSec)
@@ -158,14 +188,7 @@ func (ac *apiClient) downloadFileIfMissing(id uint64, dir string) (bool, error) 
 		return false, err
 	}
 
-	fn := fmt.Sprintf("%v", id)
-	if cdp := resp.Header.Get("Content-Disposition"); cdp != "" {
-		groups := ac.reDownloadName.FindStringSubmatch(cdp)
-		if groups != nil {
-			name := limitLength(groups[1], maxFileNameLen)
-			fn += "-" + name
-		}
-	}
+	fn := ac.getFileName(id, resp)
 	fn = path.Join(dir, fn)
 
 	if stat, err := os.Stat(fn); err == nil && stat.Size() != 0 {
