@@ -1,6 +1,6 @@
 # Raindrop bookmark backup
 
-This is a minimalistic command line tool that downloads a local backup of your [Raindrop.io](https://raindrop.io/) bookmarks.
+`rdbak` is a minimalistic command line tool that downloads a local backup of your [Raindrop.io](https://raindrop.io/) bookmarks.
 
 - Raindrop keeps a permanent copy of your bookmarks in the cloud. I.e., it stores not only the URL and page title, but the full content.
 - This tool retrieves your bookmarks and saves their permanent copy in your local file system.
@@ -27,8 +27,10 @@ the caveat about the private API.
 
 ## Build and run from source
 
-Make a copy of `config.sample.json` named `config.dev.json` and edit the file. Add the user name and password you use to log in to Raindrop.io at [app.raindrop.ip](app.raindrop.io)
-or via the browser addin.
+`rdbak` is written in Go. You need to have Go 1.21 or higher installed on your system to build it.
+
+Before running `rdbak` from source for the first time, make a copy of `config.sample.json` named `config.dev.json` and edit it.
+Add the user name and password you use to log in to Raindrop.io at [app.raindrop.ip](app.raindrop.io) or via the browser addin.
 
 Build and run `rdbak` from source with this command from the repository root:
 
@@ -44,4 +46,29 @@ Subsequently, you can download your new bookmarks by running:
 ```
 go run . backup
 ```
+
+## Running on Synology
+
+My use case is to run `rdbak` directly on my Synology disk station. [build.sh](./build.sh) contains the exact command to build it for the ARMv7 platform that most of the
+low-end models are built on.
+
+I followed these steps to set up automated backup on my disk station:
+
+- Enable SSH access so I can do subsequent steps from the command line
+- Create /opt/rdbak and upload [rdbak.sh](./rdbak.sh) and the sample config file there.
+- Upload the built binary to /opt/rdbak/bin
+- Edit the config file, enter the plain text password
+- Edit and run [rdbak.sh](./rdbak.sh) to encrypt the password
+- Edit and run [rdbak.sh](./rdbak.sh) to download the permanent copies
+
+I chose a download directory under `/volume1` that is also a shared volume, so I can access the archive conveniently over the network.
+
+To set up a nightly backup, you need to edit `/etc/crontab` directly. I added this line to run the scipt at 2:30 AM every morning:
+
+```
+#minute	hour	mday	month	wday	who	command
+30	2	*	*	*	root	/opt/rdbak/rdbak.sh
+```
+
+After editing this file you need to restart the cron daemon using `systemctl restart crond`.
 
