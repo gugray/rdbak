@@ -43,12 +43,9 @@ func TestLimitLength(t *testing.T) {
 	}
 }
 
-// PDF:  520917616
-// 50MB: 715650327
-// Normal HTML: 758257704
 func TestDownloadFileManual(t *testing.T) {
 	ac := newApiClient()
-	ac.login("", "") // Fill in manually
+	ac.login("", "") // Fill in manually; don't commit :)
 	// Works if CWD is rdbak/internal, i.e., where current source file is
-	ac.downloadFileIfMissing(715650327, "../work")
+	ac.downloadFileIfMissing(589740577, "../work")
 }
