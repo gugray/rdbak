@@ -134,7 +134,7 @@ func safeDeleteFile(fn string) {
 		return
 	}
 	if err := os.Remove(fn); err != nil {
-		fmt.Printf("Tried to delete %s, got error: %v", fn, err)
+		fmt.Printf("Tried to delete %s, got error: %v\n", fn, err)
 	}
 }
 
@@ -170,6 +170,8 @@ func (ac *apiClient) getFileName(id uint64, resp *http.Response) string {
 
 func (ac *apiClient) downloadFileIfMissing(id uint64, dir string) (bool, error) {
 
+	fmt.Printf("Downloading bookmark %d\n", id)
+
 	etc := NewExtensibleTimeoutContext(timeoutSec)
 	defer etc.Cancel()
 	url := fmt.Sprintf(downloadUrl, id)
@@ -192,6 +194,7 @@ func (ac *apiClient) downloadFileIfMissing(id uint64, dir string) (bool, error) 
 	fn = path.Join(dir, fn)
 
 	if stat, err := os.Stat(fn); err == nil && stat.Size() != 0 {
+		fmt.Printf("File exists; skipping: %s\n", fn)
 		return false, nil
 	}
 
@@ -200,10 +203,22 @@ func (ac *apiClient) downloadFileIfMissing(id uint64, dir string) (bool, error) 
 		panic(err)
 	}
 	defer outf.Close()
+	fmt.Printf("Saving %s\n", fn)
 
 	buf := make([]byte, 32*1024)
+	savedBytes := 0
 	for {
 		n, err := resp.Body.Read(buf)
+		if (err == nil || err == io.EOF) && n > 0 {
+			if _, wrerr := outf.Write(buf[:n]); wrerr != nil {
+				fmt.Printf("Error writing to file: %v\n", wrerr)
+				outf.Close()
+				safeDeleteFile(fn)
+				return false, err
+			}
+			savedBytes += n
+			etc.Extend()
+		}
 		if err != nil {
 			if err == io.EOF {
 				break
@@ -213,11 +228,8 @@ func (ac *apiClient) downloadFileIfMissing(id uint64, dir string) (bool, error) 
 			safeDeleteFile(fn)
 			return false, err
 		}
-		if n > 0 {
-			outf.Write(buf[:n])
-			etc.Extend()
-		}
 	}
+	fmt.Printf("Download finished: %d bytes\n", savedBytes)
 
 	return true, nil
 }
