@@ -154,13 +154,13 @@ func (ac *apiClient) getFileName(id uint64, resp *http.Response) string {
 
 	// Add extension based on mime type, if present
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		newExt := ""
 		if strings.HasPrefix(ct, "application/pdf") {
-			newExt = ".pdf"
-		}
-		if newExt != "" {
 			fn = strings.TrimSuffix(fn, ".html")
-			fn += newExt
+			fn += ".pdf"
+		} else if strings.HasPrefix(ct, "text/html") {
+			if !strings.HasSuffix(fn, ".html") {
+				fn += ".html"
+			}
 		}
 	}
 
